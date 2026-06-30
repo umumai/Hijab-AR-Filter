@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Digital Hijab Catalog</title>
+  <link rel="stylesheet" href="style.css">
+
+  <!-- MediaPipe Face Mesh — official CDN (Route A: no React, no Three.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <!-- THE STAGE: full-screen container; user only sees the canvas -->
+  <div class="stage">
+    <!-- Hidden webcam feed — frames are piped here, never shown directly -->
+    <video id="webcam" autoplay playsinline muted></video>
+
+    <!-- Visible output — mirrored webcam + hijab overlay drawn here -->
+    <canvas id="output_canvas"></canvas>
+  </div>
+</body>
+</html>
