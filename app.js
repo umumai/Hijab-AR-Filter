@@ -1,112 +1,143 @@
 /**
- * Digital Hijab Catalog — MVP (Route A)
+ * Digital Hijab Catalog — static center overlay
  *
- * Vanilla HTML/CSS/JS + MediaPipe Face Mesh CDN.
- * Mirrors webcam to canvas, tracks one face, overlays a 2D hijab PNG.
+ * Vanilla HTML/CSS/JS. Mirrored webcam + fixed-center hijab PNG.
+ * User aligns their head manually; size via slider.
  */
 
+import {
+  CATALOG,
+  DEFAULT_STYLE_ID,
+  DEFAULT_COLOR_ID,
+} from './catalog.js';
+
 // =============================================================================
-// CONFIG — tune these when swapping Figma assets
+// CONFIG — static placement on canvas
 // =============================================================================
 
 const CONFIG = {
-  // SWAP: Replace with your Figma export path (transparent PNG, anchor at top-center)
-  HIJAB_IMAGE_PATH: 'hijab.png',
-
-  // Hijab width = cheek-to-cheek distance × this multiplier
-  HIJAB_WIDTH_MULTIPLIER: 2.2,
-
-  // Fraction of hijab height placed above landmark #10 (forehead center)
-  ANCHOR_Y_OFFSET: 0.15,
-
-  // MediaPipe Face Mesh landmark indices
-  FOREHEAD_LANDMARK: 10,
-  LEFT_CHEEK_LANDMARK: 234,
-  RIGHT_CHEEK_LANDMARK: 454,
-  FALLBACK_FOREHEAD_LANDMARK: 152,
+  HIJAB_BASE_WIDTH_RATIO: 0.38,
+  CENTER_Y_OFFSET_RATIO: -0.06,
 };
 
 // =============================================================================
-// DOM references
+// Selection state
+// =============================================================================
+
+let selectedStyleId = DEFAULT_STYLE_ID;
+let selectedColorId = DEFAULT_COLOR_ID;
+let userScaleMultiplier = 0.85;
+
+/** @type {Map<string, { img: HTMLImageElement, bounds: { x: number, y: number, w: number, h: number } }>} */
+const imageCache = new Map();
+
+// =============================================================================
+// DOM
 // =============================================================================
 
 const video = document.getElementById('webcam');
 const canvas = document.getElementById('output_canvas');
 const ctx = canvas.getContext('2d');
-
-// Preloaded hijab graphic — swap CONFIG.HIJAB_IMAGE_PATH for Figma exports
-const hijabImg = new Image();
-
-// Latest landmarks from Face Mesh (updated in onResults, read in render loop if needed)
-let latestLandmarks = null;
-
-// Face Mesh instance (initialized after camera is ready)
-let faceMesh = null;
+const stylePickerEl = document.getElementById('style_picker');
+const colorPickerEl = document.getElementById('color_picker');
+const sizeSliderEl = document.getElementById('size_slider');
+const sizeValueEl = document.getElementById('size_value');
+const controlsPanelEl = document.getElementById('controls_panel');
+const controlsToggleEl = document.getElementById('controls_toggle');
 
 // =============================================================================
-// Coordinate helpers — landmarks are normalized 0–1; canvas is mirrored on X
+// Catalog helpers
 // =============================================================================
 
-/**
- * Convert a normalized landmark X to canvas pixels (mirrored for selfie view).
- */
-function toCanvasX(landmark) {
-  return (1 - landmark.x) * canvas.width;
+function getStyle(styleId) {
+  return CATALOG.find((s) => s.id === styleId);
+}
+
+function getActiveColorEntry() {
+  const style = getStyle(selectedStyleId);
+  if (!style) return null;
+  return (
+    style.colors.find((c) => c.id === selectedColorId) ?? style.colors[0]
+  );
+}
+
+function getActiveHijabAsset() {
+  const entry = getActiveColorEntry();
+  if (!entry) return null;
+  return imageCache.get(entry.src) ?? null;
 }
 
 /**
- * Convert a normalized landmark Y to canvas pixels.
+ * Scan alpha channel to find tight bounds of visible artwork,
+ * ignoring transparent padding in Figma exports.
  */
-function toCanvasY(landmark) {
-  return landmark.y * canvas.height;
-}
+function computeContentBounds(img) {
+  const offscreen = document.createElement('canvas');
+  offscreen.width = img.naturalWidth;
+  offscreen.height = img.naturalHeight;
+  const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
+  offCtx.drawImage(img, 0, 0);
 
-/**
- * Euclidean distance between two landmarks on the mirrored canvas.
- */
-function landmarkDistance(a, b) {
-  return Math.hypot(toCanvasX(a) - toCanvasX(b), toCanvasY(a) - toCanvasY(b));
+  const w = offscreen.width;
+  const h = offscreen.height;
+  const { data, width, height } = offCtx.getImageData(0, 0, w, h);
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  let found = false;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const alpha = data[(y * width + x) * 4 + 3];
+      if (alpha > 10) {
+        found = true;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (!found) {
+    return { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
+  }
+
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
 // =============================================================================
-// HIJAB OVERLAY — swap hijab.png via CONFIG.HIJAB_IMAGE_PATH
+// Hijab overlay — fixed center, slider-scaled
 // =============================================================================
 
-/**
- * Draw the hijab PNG anchored to forehead landmark #10, scaled by cheek width.
- * Called from onResults (per Face Mesh callback) and after inference in renderLoop
- * so the overlay stays aligned with the mirrored frame.
- */
-function drawHijab(landmarks) {
-  // Primary anchor: forehead center (#10); fallback to #152 if missing
-  const anchor =
-    landmarks[CONFIG.FOREHEAD_LANDMARK] ??
-    landmarks[CONFIG.FALLBACK_FOREHEAD_LANDMARK];
+function drawHijab() {
+  const asset = getActiveHijabAsset();
+  if (!asset) return;
 
-  if (!anchor) return;
+  const { img, bounds } = asset;
+  const hijabWidth =
+    canvas.width * CONFIG.HIJAB_BASE_WIDTH_RATIO * userScaleMultiplier;
+  const hijabHeight = hijabWidth * (bounds.h / bounds.w);
 
-  const leftCheek = landmarks[CONFIG.LEFT_CHEEK_LANDMARK];
-  const rightCheek = landmarks[CONFIG.RIGHT_CHEEK_LANDMARK];
+  const drawX = (canvas.width - hijabWidth) / 2;
+  const drawY =
+    (canvas.height - hijabHeight) / 2 +
+    canvas.height * CONFIG.CENTER_Y_OFFSET_RATIO;
 
-  if (!leftCheek || !rightCheek) return;
-
-  // Scale hijab width from cheek-to-cheek distance (face closer = wider cheeks in px)
-  const cheekDist = landmarkDistance(leftCheek, rightCheek);
-  const hijabWidth = cheekDist * CONFIG.HIJAB_WIDTH_MULTIPLIER;
-  const hijabHeight = hijabWidth * (hijabImg.height / hijabImg.width);
-
-  // Anchor top-center of PNG to forehead landmark
-  const anchorX = toCanvasX(anchor);
-  const anchorY = toCanvasY(anchor);
-  const drawX = anchorX - hijabWidth / 2;
-  const drawY = anchorY - hijabHeight * CONFIG.ANCHOR_Y_OFFSET;
-
-  ctx.drawImage(hijabImg, drawX, drawY, hijabWidth, hijabHeight);
+  ctx.drawImage(
+    img,
+    bounds.x,
+    bounds.y,
+    bounds.w,
+    bounds.h,
+    drawX,
+    drawY,
+    hijabWidth,
+    hijabHeight
+  );
 }
 
-/**
- * Draw mirrored webcam frame onto the canvas (selfie mirror UX).
- */
 function drawMirroredVideo() {
   ctx.save();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -116,61 +147,26 @@ function drawMirroredVideo() {
   ctx.restore();
 }
 
-// =============================================================================
-// THE AI BRAIN — MediaPipe Face Mesh callback
-// =============================================================================
-
-/**
- * Called when Face Mesh finishes processing a frame.
- * Locates facial landmarks and draws the hijab overlay on the canvas.
- */
-function onResults(results) {
-  if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
-    latestLandmarks = null;
-    return;
-  }
-
-  latestLandmarks = results.multiFaceLandmarks[0];
-  drawHijab(latestLandmarks);
-}
-
-// =============================================================================
-// THE RENDER LOOP — requestAnimationFrame (NOT setInterval)
-// =============================================================================
-
-/**
- * Each frame: clear canvas, draw mirrored webcam, feed frame to Face Mesh.
- * Hijab is drawn in onResults when landmarks are available.
- */
-async function renderLoop() {
+function renderLoop() {
   if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-    // 1. Clear and draw mirrored webcam (selfie mirror UX)
     drawMirroredVideo();
-
-    // 2. Feed the hidden video frame into Face Mesh
-    if (faceMesh) {
-      await faceMesh.send({ image: video });
-
-      // 3. Re-draw hijab after inference so overlay matches the current frame
-      if (latestLandmarks) {
-        drawHijab(latestLandmarks);
-      }
-    }
+    drawHijab();
   }
 
   requestAnimationFrame(renderLoop);
 }
 
 // =============================================================================
-// THE CAMERA — getUserMedia → hidden video element
+// Camera init
 // =============================================================================
 
-/**
- * Request webcam access and pipe stream into the hidden <video>.
- */
 async function initCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'user' },
+    video: {
+      facingMode: 'user',
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    },
     audio: false,
   });
 
@@ -182,46 +178,34 @@ async function initCamera() {
   });
 
   await video.play();
-
-  // Match canvas internal resolution to video for accurate landmark mapping
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
 }
 
-/**
- * Initialize MediaPipe Face Mesh — single face, CDN-hosted WASM/models.
- */
-function initFaceMesh() {
-  faceMesh = new FaceMesh({
-    locateFile: (file) =>
-      `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
-  });
-
-  faceMesh.setOptions({
-    maxNumFaces: 1,
-    refineLandmarks: true,
-    minDetectionConfidence: 0.5,
-    minTrackingConfidence: 0.5,
-  });
-
-  faceMesh.onResults(onResults);
-}
-
-/**
- * Preload hijab PNG before starting the render loop.
- */
-function loadHijabImage() {
+function loadImage(src) {
   return new Promise((resolve, reject) => {
-    hijabImg.onload = resolve;
-    hijabImg.onerror = () =>
-      reject(new Error(`Failed to load hijab image: ${CONFIG.HIJAB_IMAGE_PATH}`));
-    hijabImg.src = CONFIG.HIJAB_IMAGE_PATH;
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load: ${src}`));
+    img.src = src;
   });
 }
 
-/**
- * Show a simple error message on the canvas when startup fails.
- */
+/** Preload all catalog PNGs for instant style/color switching */
+async function preloadCatalogImages() {
+  const srcs = CATALOG.flatMap((style) =>
+    style.colors.map((color) => color.src)
+  );
+
+  await Promise.all(
+    srcs.map(async (src) => {
+      const img = await loadImage(src);
+      const bounds = computeContentBounds(img);
+      imageCache.set(src, { img, bounds });
+    })
+  );
+}
+
 function showError(message) {
   ctx.fillStyle = '#fff';
   ctx.font = '18px system-ui, sans-serif';
@@ -230,18 +214,112 @@ function showError(message) {
 }
 
 // =============================================================================
+// Customization UI
+// =============================================================================
+
+function renderColorPicker() {
+  const style = getStyle(selectedStyleId);
+  if (!style) return;
+
+  colorPickerEl.innerHTML = '';
+
+  style.colors.forEach((color) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'color-picker__btn';
+    btn.setAttribute('role', 'option');
+    btn.setAttribute('aria-label', color.name);
+    btn.setAttribute('aria-selected', color.id === selectedColorId ? 'true' : 'false');
+    btn.style.backgroundColor = color.hex;
+    if (color.id === selectedColorId) {
+      btn.classList.add('is-active');
+    }
+
+    btn.addEventListener('click', () => {
+      selectedColorId = color.id;
+      renderColorPicker();
+    });
+
+    colorPickerEl.appendChild(btn);
+  });
+}
+
+function renderStylePicker() {
+  stylePickerEl.innerHTML = '';
+
+  CATALOG.forEach((style) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'style-picker__btn';
+    btn.setAttribute('role', 'option');
+    btn.setAttribute('aria-selected', style.id === selectedStyleId ? 'true' : 'false');
+    if (style.id === selectedStyleId) {
+      btn.classList.add('is-active');
+    }
+
+    btn.textContent = style.name;
+
+    btn.addEventListener('click', () => {
+      selectedStyleId = style.id;
+      const styleEntry = getStyle(selectedStyleId);
+      const hasColor = styleEntry?.colors.some((c) => c.id === selectedColorId);
+      if (!hasColor && styleEntry) {
+        selectedColorId = styleEntry.colors[0].id;
+      }
+      renderStylePicker();
+      renderColorPicker();
+    });
+
+    stylePickerEl.appendChild(btn);
+  });
+}
+
+function setControlsOpen(open) {
+  controlsToggleEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+  controlsToggleEl.setAttribute(
+    'aria-label',
+    open ? 'Close hijab options' : 'Open hijab options'
+  );
+  controlsPanelEl.setAttribute('aria-hidden', open ? 'false' : 'true');
+  controlsPanelEl.classList.toggle('is-open', open);
+}
+
+function initControls() {
+  renderStylePicker();
+  renderColorPicker();
+  setControlsOpen(false);
+
+  controlsToggleEl.addEventListener('click', () => {
+    const isOpen = controlsToggleEl.getAttribute('aria-expanded') === 'true';
+    setControlsOpen(!isOpen);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && controlsToggleEl.getAttribute('aria-expanded') === 'true') {
+      setControlsOpen(false);
+    }
+  });
+
+  sizeSliderEl.addEventListener('input', () => {
+    const value = Number(sizeSliderEl.value);
+    userScaleMultiplier = value / 100;
+    sizeValueEl.textContent = `${value}%`;
+    sizeSliderEl.setAttribute('aria-valuenow', String(value));
+  });
+}
+
+// =============================================================================
 // Bootstrap
 // =============================================================================
 
 async function main() {
-  // Default canvas size until video metadata loads (for error display)
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
   try {
-    await loadHijabImage();
+    initControls();
+    await preloadCatalogImages();
     await initCamera();
-    initFaceMesh();
     requestAnimationFrame(renderLoop);
   } catch (err) {
     console.error(err);

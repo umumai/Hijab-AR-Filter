@@ -2,22 +2,45 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Digital Hijab Catalog</title>
   <link rel="stylesheet" href="style.css">
-
-  <!-- MediaPipe Face Mesh — official CDN (Route A: no React, no Three.js) -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-  <script defer src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </head>
 <body>
-  <!-- THE STAGE: full-screen container; user only sees the canvas -->
   <div class="stage">
-    <!-- Hidden webcam feed — frames are piped here, never shown directly -->
+    <!-- Hidden webcam feed — frames piped here, never shown directly -->
     <video id="webcam" autoplay playsinline muted></video>
 
-    <!-- Visible output — mirrored webcam + hijab overlay drawn here -->
+    <!-- Mirrored webcam + hijab AR overlay -->
     <canvas id="output_canvas"></canvas>
+
+    <!-- Collapsible customization — hidden by default -->
+    <div class="controls-shell">
+      <button
+        type="button"
+        class="controls-toggle"
+        id="controls_toggle"
+        aria-expanded="false"
+        aria-controls="controls_panel"
+        aria-label="Open hijab options"
+      >
+        <svg class="controls-toggle__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <aside class="controls" id="controls_panel" aria-label="Customize hijab" aria-hidden="true">
+        <div class="controls__row">
+          <div class="style-picker" id="style_picker" role="listbox" aria-label="Hijab style"></div>
+          <div class="color-picker" id="color_picker" role="listbox" aria-label="Hijab color"></div>
+        </div>
+        <div class="size-control">
+          <input type="range" id="size_slider" min="50" max="130" value="85" step="1" aria-label="Hijab size" aria-valuemin="50" aria-valuemax="130" aria-valuenow="85">
+          <span class="size-control__value" id="size_value" aria-live="polite">85%</span>
+        </div>
+      </aside>
+    </div>
   </div>
 </body>
 </html>

@@ -1,27 +1,209 @@
-/* Reset — full viewport, no scrollbars */
+/* Reset — full viewport */
 html,
 body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* THE STAGE — fills the entire screen */
 .stage {
   position: fixed;
   inset: 0;
-  background: #000;
+  background: #0a0a0a;
 }
 
-/* THE CAMERA — hidden completely; used only as a frame source for Face Mesh */
 #webcam {
   display: none;
 }
 
-/* THE CANVAS — only visible element; covers the stage */
 #output_canvas {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Collapsible controls — small FAB, panel hidden until opened                 */
+/* -------------------------------------------------------------------------- */
+
+.controls-shell {
+  position: fixed;
+  right: max(0.75rem, env(safe-area-inset-right));
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
+.controls-shell > * {
+  pointer-events: auto;
+}
+
+/* Floating toggle — only visible chrome when panel is closed */
+.controls-toggle {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: rgba(12, 12, 14, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+  transition: background 0.15s, transform 0.1s;
+}
+
+.controls-toggle:active {
+  transform: scale(0.94);
+}
+
+.controls-toggle[aria-expanded='true'] {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* Panel — compact strip, slides in above the FAB */
+.controls {
+  width: min(320px, calc(100vw - 1.5rem - env(safe-area-inset-left) - env(safe-area-inset-right)));
+  padding: 0.65rem 0.75rem;
+  border-radius: 16px;
+  background: rgba(12, 12, 14, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateY(8px) scale(0.97);
+  transform-origin: bottom right;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+
+.controls.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.controls:not(.is-open) {
+  visibility: hidden;
+}
+
+.controls__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Style — compact text-only pills */
+.style-picker {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.style-picker__btn {
+  flex: 1;
+  min-height: 32px;
+  padding: 0.35rem 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.style-picker__btn.is-active {
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* Color — smaller swatches in one row */
+.color-picker {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: space-between;
+}
+
+.color-picker__btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.15s;
+}
+
+.color-picker__btn.is-active {
+  border-color: #fff;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.4);
+}
+
+.color-picker__btn[aria-label='Ivory'],
+.color-picker__btn[aria-label='Black'] {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* Size — single slim row */
+.size-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#size_slider {
+  flex: 1;
+  height: 4px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  outline: none;
+}
+
+#size_slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+#size_slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+.size-control__value {
+  min-width: 2.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  font-variant-numeric: tabular-nums;
 }
